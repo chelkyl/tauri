@@ -53,6 +53,7 @@ fn main() {
     &[
       "read-file",
       "write-file",
+      "file-stream",
       "read-dir",
       "copy-file",
       "create-dir",

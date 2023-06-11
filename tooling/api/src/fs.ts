@@ -16,6 +16,8 @@
  *         "all": true, // enable all FS APIs
  *         "readFile": true,
  *         "writeFile": true,
+ *         "readFileStream": true,
+ *         "writeFileStream": true,
  *         "readDir": true,
  *         "copyFile": true,
  *         "createDir": true,
@@ -73,6 +75,7 @@
  */
 
 import { invokeTauriCommand } from './helpers/tauri'
+import { transformCallback } from './tauri'
 
 /**
  * @since 1.0.0
@@ -211,6 +214,105 @@ async function readBinaryFile(
   })
 
   return Uint8Array.from(arr)
+}
+
+class FileStream {
+  filepath: string
+  fd: number = -1
+  closed: boolean = true
+
+  constructor(filepath: string) {
+    this.filepath = filepath
+  }
+
+  async open(): Promise<FileStream> {
+    if (!self.closed) {
+      throw new Error('open called on already opened file stream')
+    }
+    const fd = await invokeTauriCommand<number>({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'openFileStream',
+        filepath: this.filepath
+      }
+    })
+    this.fd = fd
+    this.closed = false
+    return this
+  }
+
+  async close(): Promise<void> {
+    if (self.closed) {
+      throw new Error('close called on already closed file stream')
+    }
+    await invokeTauriCommand({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'closeFileStream',
+        fd: this.fd
+      }
+    })
+    this.fd = -1
+    this.closed = true
+  }
+
+  /**
+   * Reads `data` from the file stream.
+   *
+   * @param onData A function to process data read from the file stream.
+   * @example
+   * ```typescript
+   * import { FileStream } from '@tauri-apps/api/fs';
+   * const stream = new FileStream('node');
+   * await stream.open();
+   * await stream.read(data => console.log(`read ${data}`));
+   * ```
+   *
+   * @returns A promise indicating the success or failure of the operation.
+   */
+  async read(onData: (data: Uint8Array) => void): Promise<void> {
+    if (self.closed) {
+      throw new Error(`read called on closed file stream`)
+    }
+    return invokeTauriCommand({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'readFileStream',
+        fd: this.fd,
+        onDataFn: transformCallback(onData)
+      }
+    })
+  }
+
+  /**
+   * Writes `data` to the file stream.
+   *
+   * @param data The message to write, either a string or a byte array.
+   * @example
+   * ```typescript
+   * import { FileStream } from '@tauri-apps/api/fs';
+   * const stream = new FileStream('node');
+   * await stream.open();
+   * await stream.write('message');
+   * await stream.write([0, 1, 2, 3, 4, 5]);
+   * ```
+   *
+   * @returns A promise indicating the success or failure of the operation.
+   */
+  async write(data: string | Uint8Array): Promise<void> {
+    if (self.closed) {
+      throw new Error(`write called on closed file stream`)
+    }
+    return invokeTauriCommand({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'writeFileStream',
+        fd: this.fd,
+        // correctly serialize Uint8Arrays
+        buffer: typeof data === 'string' ? data : Array.from(data)
+      }
+    })
+  }
 }
 
 /**
@@ -591,6 +693,7 @@ export type {
 
 export {
   BaseDirectory as Dir,
+  FileStream,
   readTextFile,
   readBinaryFile,
   writeTextFile,

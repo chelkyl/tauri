@@ -8,8 +8,10 @@ use crate::{
   api::{
     dir,
     file::{self, SafePathBuf},
+    ipc::CallbackFn,
     path::BaseDirectory,
   },
+  event,
   scope::Scopes,
   Config, Env, Manager, PackageInfo, Runtime, Window,
 };
@@ -27,10 +29,29 @@ use std::fmt::{Debug, Formatter};
 use std::{
   fs,
   fs::File,
+  fs::OpenOptions,
   io::Write,
+  os,
+  os::fd::AsRawFd,
   path::{Component, Path},
-  sync::Arc,
+  sync::{Arc, Mutex},
 };
+use tokio::{
+  fs::File as TokioFile,
+  io::{self, AsyncBufReadExt, AsyncWriteExt, BufStream},
+  sync::Mutex as TokioMutex,
+};
+
+use std::collections::HashMap;
+
+type FileStreamFd = os::fd::RawFd;
+type FileStreamStore = Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufStream<TokioFile>>>>>>;
+
+fn file_stream_store() -> &'static FileStreamStore {
+  use once_cell::sync::Lazy;
+  static STORE: Lazy<FileStreamStore> = Lazy::new(Default::default);
+  &STORE
+}
 
 /// The options for the directory functions on the file system API.
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +96,24 @@ pub(crate) enum Cmd {
     contents: Vec<u8>,
     options: Option<FileOperationOptions>,
   },
+  /// The open file stream API.
+  #[cmd(fs_file_stream, "fs > openFileStream")]
+  OpenFileStream {
+    path: SafePathBuf,
+    options: Option<FileOperationOptions>,
+  },
+  /// The read file stream API.
+  #[cmd(fs_file_stream, "fs > readFileStream")]
+  ReadFileStream {
+    fd: FileStreamFd,
+    on_data_fn: CallbackFn,
+  },
+  /// The write file stream API.
+  #[cmd(fs_file_stream, "fs > writeFileStream")]
+  WriteFileStream { fd: FileStreamFd, data: Vec<u8> },
+  /// The close file stream API.
+  #[cmd(fs_file_stream, "fs > closeFileStream")]
+  CloseFileStream { fd: FileStreamFd },
   /// The read dir API.
   #[cmd(fs_read_dir, "fs > readDir")]
   ReadDir {
@@ -177,6 +216,88 @@ impl Cmd {
       .with_context(|| format!("path: {}", resolved_path.display()))
       .map_err(Into::into)
       .and_then(|mut f| f.write_all(&contents).map_err(|err| err.into()))
+  }
+
+  #[module_command_handler(fs_file_stream)]
+  fn open_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    path: SafePathBuf,
+    options: Option<FileOperationOptions>,
+  ) -> super::Result<FileStreamFd> {
+    let resolved_path = resolve_path(
+      &context.config,
+      &context.package_info,
+      &context.window,
+      path,
+      options.and_then(|o| o.dir),
+    )?;
+    let open_file = OpenOptions::new()
+      .append(true)
+      .create(true)
+      .open(&resolved_path)
+      .with_context(|| format!("path: {}", resolved_path.display()))?;
+    let open_file = TokioFile::from_std(open_file);
+    let open_fd = open_file.as_raw_fd();
+
+    // 64 KiB buffer
+    let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
+      65536, 65536, open_file,
+    )));
+    file_stream_store().lock().unwrap().insert(open_fd, stream);
+
+    Ok(open_fd)
+  }
+
+  #[module_command_handler(fs_file_stream)]
+  fn read_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    fd: FileStreamFd,
+    on_data_fn: CallbackFn,
+  ) -> super::Result<()> {
+    if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
+      let stream = stream_.clone();
+      crate::async_runtime::spawn(async move {
+        while let Ok(buffer) = stream.lock().await.fill_buf().await {
+          stream.lock().await.consume(buffer.len());
+          let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
+            .expect("unable to serialize data");
+
+          let _ = context.window.eval(js.as_str());
+        }
+      });
+    }
+    Ok(())
+  }
+
+  #[module_command_handler(fs_file_stream)]
+  #[allow(unused_variables)]
+  fn write_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    fd: FileStreamFd,
+    data: Vec<u8>,
+  ) -> super::Result<()> {
+    if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
+      let stream = stream_.clone();
+      crate::async_runtime::spawn(async move {
+        stream
+          .lock()
+          .await
+          .write_all(&data)
+          .await
+          .expect("failed to write to file stream");
+      });
+    }
+    Ok(())
+  }
+
+  #[module_command_handler(fs_file_stream)]
+  #[allow(unused_variables)]
+  fn close_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    fd: FileStreamFd,
+  ) -> super::Result<()> {
+    file_stream_store().lock().unwrap().remove(&fd);
+    Ok(())
   }
 
   #[module_command_handler(fs_read_dir)]
@@ -392,7 +513,9 @@ fn resolve_path<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
-  use super::{BaseDirectory, DirOperationOptions, FileOperationOptions, SafePathBuf};
+  use super::{
+    BaseDirectory, DirOperationOptions, FileOperationOptions, FileStreamFd, SafePathBuf,
+  };
 
   use quickcheck::{Arbitrary, Gen};
 
@@ -434,6 +557,34 @@ mod tests {
   #[quickcheck_macros::quickcheck]
   fn write_file(path: SafePathBuf, contents: Vec<u8>, options: Option<FileOperationOptions>) {
     let res = super::Cmd::write_file(crate::test::mock_invoke_context(), path, contents, options);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_file_stream, "fs > openFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn open_file_stream(path: SafePathBuf, options: Option<FileOperationOptions>) {
+    let res = super::Cmd::open_file_stream(crate::test::mock_invoke_context(), path, options);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_file_stream, "fs > readFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn read_file_stream(fd: FileStreamFd, on_data_fn: crate::api::ipc::CallbackFn) {
+    let res = super::Cmd::read_file_stream(crate::test::mock_invoke_context(), fd, on_data_fn);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_file_stream, "fs > writeFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn write_file_stream(fd: FileStreamFd, data: Vec<u8>) {
+    let res = super::Cmd::write_file_stream(crate::test::mock_invoke_context(), fd, data);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_file_stream, "fs > closeFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn close_file_stream(fd: FileStreamFd) {
+    let res = super::Cmd::close_file_stream(crate::test::mock_invoke_context(), fd);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 

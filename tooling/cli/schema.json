@@ -53,11 +53,13 @@
             "exists": false,
             "readDir": false,
             "readFile": false,
+            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false
+            "writeFile": false,
+            "writeFileStream": false
           },
           "globalShortcut": {
             "all": false
@@ -331,11 +333,13 @@
               "exists": false,
               "readDir": false,
               "readFile": false,
+              "readFileStream": false,
               "removeDir": false,
               "removeFile": false,
               "renameFile": false,
               "scope": [],
-              "writeFile": false
+              "writeFile": false,
+              "writeFileStream": false
             },
             "globalShortcut": {
               "all": false
@@ -1760,11 +1764,13 @@
             "exists": false,
             "readDir": false,
             "readFile": false,
+            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false
+            "writeFile": false,
+            "writeFileStream": false
           },
           "allOf": [
             {
@@ -1982,6 +1988,16 @@
         },
         "writeFile": {
           "description": "Write file to local filesystem.",
+          "default": false,
+          "type": "boolean"
+        },
+        "readFileStream": {
+          "description": "Stream read file from local filesystem.",
+          "default": false,
+          "type": "boolean"
+        },
+        "writeFileStream": {
+          "description": "Stream write file to local filesystem.",
           "default": false,
           "type": "boolean"
         },
