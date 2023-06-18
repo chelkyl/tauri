@@ -1353,9 +1353,12 @@ pub struct FsAllowlistConfig {
   /// Write file to local filesystem.
   #[serde(default, alias = "write-file")]
   pub write_file: bool,
-  /// Stream to/from file on local filesystem.
-  #[serde(default, alias = "file-stream")]
-  pub file_stream: bool,
+  /// Read from file stream on local filesystem.
+  #[serde(default, alias = "read-file-stream")]
+  pub read_file_stream: bool,
+  /// Write to file stream on local filesystem.
+  #[serde(default, alias = "write-file-stream")]
+  pub write_file_stream: bool,
   /// Read directory from local filesystem.
   #[serde(default, alias = "read-dir")]
   pub read_dir: bool,
@@ -1386,7 +1389,8 @@ impl Allowlist for FsAllowlistConfig {
       all: false,
       read_file: true,
       write_file: true,
-      file_stream: true,
+      read_file_stream: true,
+      write_file_stream: true,
       read_dir: true,
       copy_file: true,
       create_dir: true,
@@ -1407,7 +1411,8 @@ impl Allowlist for FsAllowlistConfig {
       let mut features = Vec::new();
       check_feature!(self, features, read_file, "fs-read-file");
       check_feature!(self, features, write_file, "fs-write-file");
-      check_feature!(self, features, file_stream, "fs-file-stream");
+      check_feature!(self, features, read_file_stream, "fs-read-file-stream");
+      check_feature!(self, features, write_file_stream, "fs-write-file-stream");
       check_feature!(self, features, read_dir, "fs-read-dir");
       check_feature!(self, features, copy_file, "fs-copy-file");
       check_feature!(self, features, create_dir, "fs-create-dir");

@@ -51,14 +51,15 @@
             "copyFile": false,
             "createDir": false,
             "exists": false,
-            "fileStream": false,
             "readDir": false,
             "readFile": false,
+            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false
+            "writeFile": false,
+            "writeFileStream": false
           },
           "globalShortcut": {
             "all": false
@@ -330,14 +331,15 @@
               "copyFile": false,
               "createDir": false,
               "exists": false,
-              "fileStream": false,
               "readDir": false,
               "readFile": false,
+              "readFileStream": false,
               "removeDir": false,
               "removeFile": false,
               "renameFile": false,
               "scope": [],
-              "writeFile": false
+              "writeFile": false,
+              "writeFileStream": false
             },
             "globalShortcut": {
               "all": false
@@ -1760,14 +1762,15 @@
             "copyFile": false,
             "createDir": false,
             "exists": false,
-            "fileStream": false,
             "readDir": false,
             "readFile": false,
+            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false
+            "writeFile": false,
+            "writeFileStream": false
           },
           "allOf": [
             {
@@ -1988,8 +1991,13 @@
           "default": false,
           "type": "boolean"
         },
-        "fileStream": {
-          "description": "Stream to/from file on local filesystem.",
+        "readFileStream": {
+          "description": "Read from file stream on local filesystem.",
+          "default": false,
+          "type": "boolean"
+        },
+        "writeFileStream": {
+          "description": "Write to file stream on local filesystem.",
           "default": false,
           "type": "boolean"
         },

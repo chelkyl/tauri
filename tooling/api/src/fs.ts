@@ -220,28 +220,9 @@ class FileStream {
   filepath: string
   fd: number = -1
   closed: boolean = true
-  options: FsOptions = {}
 
-  constructor(filepath: string, options: FsOptions = {}) {
+  constructor(filepath: string) {
     this.filepath = filepath
-    this.options = options
-  }
-
-  async open(): Promise<FileStream> {
-    if (!this.closed) {
-      throw new Error('open called on already opened file stream')
-    }
-    const fd = await invokeTauriCommand<number>({
-      __tauriModule: 'Fs',
-      message: {
-        cmd: 'openFileStream',
-        path: this.filepath,
-        options: this.options
-      }
-    })
-    this.fd = fd
-    this.closed = false
-    return this
   }
 
   async close(): Promise<void> {
@@ -257,6 +238,25 @@ class FileStream {
     })
     this.fd = -1
     this.closed = true
+  }
+}
+
+class ReadFileStream extends FileStream {
+  async open(options: FsOptions = {}): Promise<FileStream> {
+    if (!this.closed) {
+      throw new Error('open called on already opened file stream')
+    }
+    const fd = await invokeTauriCommand<number>({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'openReadFileStream',
+        path: this.filepath,
+        options
+      }
+    })
+    this.fd = fd
+    this.closed = false
+    return this
   }
 
   /**
@@ -285,6 +285,25 @@ class FileStream {
         onDataFn: transformCallback(onData)
       }
     })
+  }
+}
+
+class WriteFileStream extends FileStream {
+  async open(options: FsOptions = {}): Promise<FileStream> {
+    if (!this.closed) {
+      throw new Error('open called on already opened file stream')
+    }
+    const fd = await invokeTauriCommand<number>({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: 'openWriteFileStream',
+        path: this.filepath,
+        options
+      }
+    })
+    this.fd = fd
+    this.closed = false
+    return this
   }
 
   /**
@@ -697,6 +716,8 @@ export type {
 export {
   BaseDirectory as Dir,
   FileStream,
+  ReadFileStream,
+  WriteFileStream,
   readTextFile,
   readBinaryFile,
   writeTextFile,

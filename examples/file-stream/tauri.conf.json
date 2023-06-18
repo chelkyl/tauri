@@ -43,7 +43,8 @@
     },
     "allowlist": {
       "fs": {
-        "fileStream": true,
+        "readFileStream": true,
+        "writeFileStream": true,
         "scope": [
           "$DATA/*",
           "$TEMP/*"

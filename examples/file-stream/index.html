@@ -8,101 +8,134 @@
 
   <body>
     <h1>Tauri File Streaming</h1>
-    <div>
-      <label for="base-directory">Base file directory</label>
-      <select id="base-directory-select" name="base-directory"></select>
-      <br>
-      <label for="filepath">Filepath:</label>
-      <input id="filepath-input" name="filepath">
-      <button id="open-stream">Open stream</button>
-      <div id="open-stream-result"></div>
-      <br>
-      <textarea id="write-input"></textarea>
-      <button id="write-content">Write</button>
-      <div id="write-result"></div>
-      <br>
-      <button id="read-content">Read chunk</button>
-      <button id="clear-read-content">Clear read chunks</button>
-      <div id="read-result"></div>
+    <label for="base-directory">Base file directory</label>
+    <select id="base-directory-select" name="base-directory"></select>
+    <div id="grid">
+      <div>
+        <label for="write-filepath">Filepath:</label>
+        <input id="write-filepath-input" name="write-filepath">
+        <button id="write-filepath-open">Open write stream</button>
+        <div id="write-filepath-open-result"></div>
+        <br>
+        <textarea id="write-content-input"></textarea>
+        <button id="write-content">Write</button>
+        <div id="write-content-result"></div>
+      </div>
+      <div>
+        <label for="read-filepath">Filepath:</label>
+        <input id="read-filepath-input" name="read-filepath">
+        <button id="read-filepath-open">Open read stream</button>
+        <div id="read-filepath-open-result"></div>
+        <br>
+        <button id="read-content">Read chunk</button>
+        <button id="clear-read-content">Clear read chunks</button>
+        <div id="read-content-result"></div>
+      </div>
     </div>
-    <!-- <div>
-      <label for="read-filepath">Read from:</label>
-      <input id="read-filepath-input" name="read-filepath">
-      <button onclick="open_read_stream">Open read stream</button>
-      <div id="open-read-stream-result"></div>
-      <br>
-      <button onclick="read_from_stream">Read chunk</button>
-      <div id="read-container"></div>
-    </div>
-    <div>
-      <label for="write-filepath">Write from:</label>
-      <input id="write-filepath-input" name="write-filepath">
-      <button onclick="open_write_stream">Open write stream</button>
-      <br>
-      <textarea id="write-content-input"></textarea>
-      <button onclick="write_to_stream">Write chunk</button>
-    </div> -->
     <script>
-      const { FileStream, BaseDirectory } = window.__TAURI__.fs
+      const { ReadFileStream, WriteFileStream, BaseDirectory } = window.__TAURI__.fs
 
-      let filestream
+      /**
+       * @typedef {object} ReadFileStream
+       * @property {string} filepath
+       * @property {number} fd
+       * @property {boolean} closed
+       * @property {(options: FsOptions) => Promise<ReadFileStream>} open
+       * @property {() => Promise<void>} close
+       * @property {(onData: (data: Uint8Array) => void) => Promise<void>} read
+       */
 
-      /** @type HTMLSelectElement */
+      /**
+       * @typedef {object} WriteFileStream
+       * @property {string} filepath
+       * @property {number} fd
+       * @property {boolean} closed
+       * @property {(options: FsOptions) => Promise<ReadFileStream>} open
+       * @property {() => Promise<void>} close
+       * @property {(data: string | Uint8Array) => Promise<void>} write
+       */
+
+       /** @type {ReadFileStream} */
+      let readFilestream
+      /** @type {WriteFileStream} */
+      let writeFilestream
+
+      /** @type {HTMLSelectElement} */
       const baseDirectorySelect = document.querySelector('#base-directory-select')
-      /** @type HTMLInputElement */
-      const filepathInput = document.querySelector('#filepath-input')
-      /** @type HTMLButtonElement */
-      const openButton = document.querySelector('#open-stream')
-      /** @type HTMLDivElement */
-      const openStreamResult = document.querySelector('#open-stream-result')
 
-      /** @type HTMLButtonElement */
+      /** @type {HTMLInputElement} */
+      const writeFilepathInput = document.querySelector('#write-filepath-input')
+      /** @type {HTMLButtonElement} */
+      const writeOpenButton = document.querySelector('#write-filepath-open')
+      /** @type {HTMLDivElement} */
+      const writeOpenResult = document.querySelector('#write-filepath-open-result')
+
+      /** @type {HTMLButtonElement} */
       const writeButton = document.querySelector('#write-content')
-      /** @type HTMLInputElement */
-      const writeInput = document.querySelector('#write-input')
-      /** @type HTMLDivElement */
-      const writeResult = document.querySelector('#write-result')
+      /** @type {HTMLInputElement} */
+      const writeInput = document.querySelector('#write-content-input')
+      /** @type {HTMLDivElement} */
+      const writeResult = document.querySelector('#write-content-result')
 
-      /** @type HTMLButtonElement */
+      /** @type {HTMLInputElement} */
+      const readFilepathInput = document.querySelector('#read-filepath-input')
+      /** @type {HTMLButtonElement} */
+      const readOpenButton = document.querySelector('#read-filepath-open')
+      /** @type {HTMLDivElement} */
+      const readOpenResult = document.querySelector('#read-filepath-open-result')
+
+      /** @type {HTMLButtonElement} */
       const readButton = document.querySelector('#read-content')
-      /** @type HTMLDivElement */
-      const readResult = document.querySelector('#read-result')
-      /** @type HTMLButtonElement */
+      /** @type {HTMLButtonElement} */
       const clearReadButton = document.querySelector('#clear-read-content')
+      /** @type {HTMLDivElement} */
+      const readResult = document.querySelector('#read-content-result')
 
-      async function openStream(e) {
-        filestream = new FileStream(filepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
-        openStreamResult.innerText = ''
+      /** @type {HTMLDivElement} */
+      const gridContainer = document.querySelector('#grid')
+      gridContainer.style.display = 'grid'
+      gridContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(300px, auto))'
+
+      /**
+       * @param {ReadFileStream|WriteFileStream} cls
+       * @param {HTMLInputElement} filepathInput
+       * @param {HTMLDivElement} resultElement
+       */
+      async function openStream(cls, filepathInput, resultElement) {
+        const filestream = new cls(filepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
+        resultElement.innerText = ''
         try {
           await filestream.open()
-          openStreamResult.innerText = 'Opened successfully'
+          resultElement.innerText = 'Opened successfully'
         } catch (error) {
-          openStreamResult.innerText = `${error}`
+          resultElement.innerText = `${error}`
         }
+        return filestream
       }
 
-      async function writeToStream(e) {
+      async function writeToStream() {
         writeResult.innerText = ''
-        if (!filestream) {
-          alert('Filestream is not open!')
+        if (!writeFilestream) {
+          writeResult.innerText = 'Filestream is not open!'
           return
         }
         try {
-          await filestream.write(writeInput.value)
+          await writeFilestream.write(writeInput.value)
           writeResult.innerText = 'Success'
+          writeInput.value = ''
         } catch (error) {
           writeResult.innerText = `Error: ${error}`
         }
       }
 
-      async function readFromStream(e) {
-        if (!filestream) {
-          alert('Filestream is not open!')
+      async function readFromStream() {
+        if (!readFilestream) {
+          readResult.innerText = 'Filestream is not open!'
           return
         }
         try {
-          await filestream.read((data) => console.log(data))
-          // await filestream.read((data) => {
+          await readFilestream.read((data) => console.log(data))
+          // await readFilestream.read((data) => {
           //   const textElement = document.createElement('p')
           //   textElement.innerText = `${data}`
           //   readResult.appendChild(textElement)
@@ -133,16 +166,25 @@
       }
       baseDirectorySelect.firstChild.selected = true
 
-      const enterKeyCode = 13
-
-      filepathInput.addEventListener('keyup', (e) => {
-        /** @type KeyboardEvent */
+      const openWriteStream = () => openStream(WriteFileStream, writeFilepathInput, writeOpenResult)
+      writeFilepathInput.addEventListener('keyup', (e) => {
+        /** @type {KeyboardEvent} */
         const evt = e
-        if (evt.which == enterKeyCode) {
-          openStream(e)
+        if (evt.key == "Enter") {
+          openWriteStream()
         }
       })
-      openButton.addEventListener('click', openStream)
+      writeOpenButton.addEventListener('click', openWriteStream)
+
+      const openReadStream = () => openStream(ReadFileStream, readFilepathInput, readOpenResult)
+      readFilepathInput.addEventListener('keyup', (e) => {
+        /** @type {KeyboardEvent} */
+        const evt = e
+        if (evt.key == "Enter") {
+          openReadStream()
+        }
+      })
+      readOpenButton.addEventListener('click', openReadStream)
 
       writeButton.addEventListener('click', writeToStream)
 

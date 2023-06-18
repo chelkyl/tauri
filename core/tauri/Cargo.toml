@@ -212,7 +212,8 @@ fs-all = [
   "fs-copy-file",
   "fs-create-dir",
   "fs-exists",
-  "fs-file-stream",
+  "fs-read-file-stream",
+  "fs-write-file-stream",
   "fs-read-file",
   "fs-read-dir",
   "fs-remove-dir",
@@ -223,7 +224,8 @@ fs-all = [
 fs-copy-file = []
 fs-create-dir = []
 fs-exists = []
-fs-file-stream = []
+fs-read-file-stream = []
+fs-write-file-stream = []
 fs-read-file = []
 fs-read-dir = []
 fs-remove-dir = []
@@ -325,7 +327,7 @@ path = "../../examples/commands/main.rs"
 [[example]]
 name = "file-stream"
 path = "../../examples/file-stream/main.rs"
-required-features = ["fs-file-stream", "path-all"]
+required-features = ["fs-read-file-stream", "fs-write-file-stream"]
 
 [[example]]
 name = "helloworld"

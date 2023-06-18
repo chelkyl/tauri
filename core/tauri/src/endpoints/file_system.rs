@@ -38,7 +38,7 @@ use std::{
 };
 use tokio::{
   fs::File as TokioFile,
-  io::{self, AsyncBufReadExt, AsyncWriteExt, BufStream},
+  io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufStream},
   sync::Mutex as TokioMutex,
 };
 
@@ -104,24 +104,30 @@ pub(crate) enum Cmd {
     contents: Vec<u8>,
     options: Option<FileOperationOptions>,
   },
-  /// The open file stream API.
-  #[cmd(fs_file_stream, "fs > openFileStream")]
-  OpenFileStream {
+  /// The open read file stream API.
+  #[cmd(fs_read_file_stream, "fs > openReadFileStream")]
+  OpenReadFileStream {
     path: SafePathBuf,
     options: Option<FileOperationOptions>,
   },
   /// The read file stream API.
-  #[cmd(fs_file_stream, "fs > readFileStream")]
+  #[cmd(fs_read_file_stream, "fs > readFileStream")]
   #[serde(rename_all = "camelCase")]
   ReadFileStream {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   },
+  /// The open write file stream API.
+  #[cmd(fs_write_file_stream, "fs > openWriteFileStream")]
+  OpenWriteFileStream {
+    path: SafePathBuf,
+    options: Option<FileOperationOptions>,
+  },
   /// The write file stream API.
-  #[cmd(fs_file_stream, "fs > writeFileStream")]
+  #[cmd(fs_write_file_stream, "fs > writeFileStream")]
   WriteFileStream { fd: FileStreamFd, buffer: Buffer },
   /// The close file stream API.
-  #[cmd(fs_file_stream, "fs > closeFileStream")]
+  #[cmd(fs_write_file_stream, "fs > closeFileStream")]
   CloseFileStream { fd: FileStreamFd },
   /// The read dir API.
   #[cmd(fs_read_dir, "fs > readDir")]
@@ -227,8 +233,8 @@ impl Cmd {
       .and_then(|mut f| f.write_all(&contents).map_err(|err| err.into()))
   }
 
-  #[module_command_handler(fs_file_stream)]
-  fn open_file_stream<R: Runtime>(
+  #[module_command_handler(fs_read_file_stream)]
+  fn open_read_file_stream<R: Runtime>(
     context: InvokeContext<R>,
     path: SafePathBuf,
     options: Option<FileOperationOptions>,
@@ -241,9 +247,7 @@ impl Cmd {
       options.and_then(|o| o.dir),
     )?;
     let open_file = OpenOptions::new()
-      // .append(false)
       .read(true)
-      // .create(true)
       .open(&resolved_path)
       .with_context(|| format!("path: {}", resolved_path.display()))?;
     let open_file = TokioFile::from_std(open_file);
@@ -262,7 +266,41 @@ impl Cmd {
     Ok(open_fd)
   }
 
-  #[module_command_handler(fs_file_stream)]
+  #[module_command_handler(fs_write_file_stream)]
+  fn open_write_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    path: SafePathBuf,
+    options: Option<FileOperationOptions>,
+  ) -> super::Result<FileStreamFd> {
+    let resolved_path = resolve_path(
+      &context.config,
+      &context.package_info,
+      &context.window,
+      path,
+      options.and_then(|o| o.dir),
+    )?;
+    let open_file = OpenOptions::new()
+      .append(false)
+      .create(true)
+      .open(&resolved_path)
+      .with_context(|| format!("path: {}", resolved_path.display()))?;
+    let open_file = TokioFile::from_std(open_file);
+    let open_fd = open_file.as_raw_fd();
+
+    // 64 KiB buffer
+    let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
+      65536, 65536, open_file,
+    )));
+    file_stream_store().lock().unwrap().insert(open_fd, stream);
+    dbg!(format!(
+      "resolved path: {} {}",
+      open_fd,
+      resolved_path.display()
+    ));
+    Ok(open_fd)
+  }
+
+  #[module_command_handler(fs_read_file_stream)]
   fn read_file_stream<R: Runtime>(
     context: InvokeContext<R>,
     fd: FileStreamFd,
@@ -276,28 +314,31 @@ impl Cmd {
         dbg!(format!("in async {}", fd));
         let mut asdf = stream.lock().await;
         dbg!(format!("locked stream {}", fd));
-        let mut buffer_len;
-        while let Ok(buffer) = asdf.fill_buf().await {
-          buffer_len = buffer.len();
-          dbg!(format!("read buffer {} {} {:?}", fd, buffer.len(), buffer));
-          dbg!(format!("consumed buffer {}", fd));
-          let js = crate::api::ipc::format_callback(on_data_fn, &buffer).map_err(|asdf| {
-            dbg!(format!("js format callback error {}", asdf));
-            asdf
-          });
-          // .expect("unable to serialize data");
+        // asdf.read
+        loop {
+          let length = {
+            let buffer = asdf.fill_buf().await.expect("msg");
+            dbg!(format!("read buffer {} {} {:?}", fd, buffer.len(), buffer));
+            let js = crate::api::ipc::format_callback(on_data_fn, &buffer).map_err(|asdf| {
+              dbg!(format!("js format callback error {}", asdf));
+              asdf
+            });
+            // .expect("unable to serialize data");
 
-          dbg!(format!("js result {:#?}", js));
-          // dbg!(format!("js str {}", js.as_str()));
-          // let _ = context.window.eval(js.as_str()).expect("could not eval js");
+            dbg!(format!("js result {:#?}", js));
+            // dbg!(format!("js str {}", js.as_str()));
+            // let _ = context.window.eval(js.as_str()).expect("could not eval js");
+            buffer.len()
+          };
+          asdf.consume(length);
+          dbg!(format!("consumed buffer {}", fd));
         }
-        asdf.consume(buffer_len);
       });
     }
     Ok(())
   }
 
-  #[module_command_handler(fs_file_stream)]
+  #[module_command_handler(fs_write_file_stream)]
   #[allow(unused_variables)]
   fn write_file_stream<R: Runtime>(
     context: InvokeContext<R>,
@@ -333,7 +374,7 @@ impl Cmd {
     Ok(())
   }
 
-  #[module_command_handler(fs_file_stream)]
+  #[module_command_handler(fs_write_file_stream)]
   #[allow(unused_variables)]
   fn close_file_stream<R: Runtime>(
     context: InvokeContext<R>,
@@ -609,28 +650,35 @@ mod tests {
     crate::test_utils::assert_not_allowlist_error(res);
   }
 
-  #[tauri_macros::module_command_test(fs_file_stream, "fs > openFileStream")]
+  #[tauri_macros::module_command_test(fs_read_file_stream, "fs > openReadFileStream")]
   #[quickcheck_macros::quickcheck]
-  fn open_file_stream(path: SafePathBuf, options: Option<FileOperationOptions>) {
-    let res = super::Cmd::open_file_stream(crate::test::mock_invoke_context(), path, options);
+  fn open_read_file_stream(path: SafePathBuf, options: Option<FileOperationOptions>) {
+    let res = super::Cmd::open_read_file_stream(crate::test::mock_invoke_context(), path, options);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 
-  #[tauri_macros::module_command_test(fs_file_stream, "fs > readFileStream")]
+  #[tauri_macros::module_command_test(fs_write_file_stream, "fs > openWriteFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn open_write_file_stream(path: SafePathBuf, options: Option<FileOperationOptions>) {
+    let res = super::Cmd::open_write_file_stream(crate::test::mock_invoke_context(), path, options);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_read_file_stream, "fs > readFileStream")]
   #[quickcheck_macros::quickcheck]
   fn read_file_stream(fd: FileStreamFd, on_data_fn: crate::api::ipc::CallbackFn) {
     let res = super::Cmd::read_file_stream(crate::test::mock_invoke_context(), fd, on_data_fn);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 
-  #[tauri_macros::module_command_test(fs_file_stream, "fs > writeFileStream")]
+  #[tauri_macros::module_command_test(fs_write_file_stream, "fs > writeFileStream")]
   #[quickcheck_macros::quickcheck]
   fn write_file_stream(fd: FileStreamFd, buffer: Buffer) {
     let res = super::Cmd::write_file_stream(crate::test::mock_invoke_context(), fd, buffer);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 
-  #[tauri_macros::module_command_test(fs_file_stream, "fs > closeFileStream")]
+  #[tauri_macros::module_command_test(fs_write_file_stream, "fs > closeFileStream")]
   #[quickcheck_macros::quickcheck]
   fn close_file_stream(fd: FileStreamFd) {
     let res = super::Cmd::close_file_stream(crate::test::mock_invoke_context(), fd);
