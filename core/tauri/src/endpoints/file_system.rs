@@ -255,11 +255,11 @@ impl Cmd {
 
     // 64 KiB buffer
     let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
-      65536, 65536, open_file,
+      65536, 0, open_file,
     )));
     file_stream_store().lock().unwrap().insert(open_fd, stream);
     dbg!(format!(
-      "resolved path: {} {}",
+      "resolved read path: {} {}",
       open_fd,
       resolved_path.display()
     ));
@@ -280,7 +280,7 @@ impl Cmd {
       options.and_then(|o| o.dir),
     )?;
     let open_file = OpenOptions::new()
-      .append(false)
+      .append(true)
       .create(true)
       .open(&resolved_path)
       .with_context(|| format!("path: {}", resolved_path.display()))?;
@@ -289,11 +289,11 @@ impl Cmd {
 
     // 64 KiB buffer
     let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
-      65536, 65536, open_file,
+      0, 65536, open_file,
     )));
     file_stream_store().lock().unwrap().insert(open_fd, stream);
     dbg!(format!(
-      "resolved path: {} {}",
+      "resolved write path: {} {}",
       open_fd,
       resolved_path.display()
     ));
@@ -301,6 +301,7 @@ impl Cmd {
   }
 
   #[module_command_handler(fs_read_file_stream)]
+  #[allow(unused_variables)]
   fn read_file_stream<R: Runtime>(
     context: InvokeContext<R>,
     fd: FileStreamFd,
@@ -318,16 +319,17 @@ impl Cmd {
         loop {
           let length = {
             let buffer = asdf.fill_buf().await.expect("msg");
+            if buffer.len() == 0 {
+              dbg!(format!("reached eof {}", fd));
+              break;
+            }
             dbg!(format!("read buffer {} {} {:?}", fd, buffer.len(), buffer));
-            let js = crate::api::ipc::format_callback(on_data_fn, &buffer).map_err(|asdf| {
-              dbg!(format!("js format callback error {}", asdf));
-              asdf
-            });
-            // .expect("unable to serialize data");
+            let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
+              .expect("unable to serialize data");
 
             dbg!(format!("js result {:#?}", js));
-            // dbg!(format!("js str {}", js.as_str()));
-            // let _ = context.window.eval(js.as_str()).expect("could not eval js");
+            dbg!(format!("js str {}", js.as_str()));
+            let _ = context.window.eval(js.as_str()).expect("could not eval js");
             buffer.len()
           };
           asdf.consume(length);
@@ -345,9 +347,12 @@ impl Cmd {
     fd: FileStreamFd,
     buffer: Buffer,
   ) -> super::Result<()> {
+    dbg!(format!("writing: {}", fd));
     if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
+      dbg!(format!("got stream {}", fd));
       let stream = stream_.clone();
       crate::async_runtime::spawn(async move {
+        dbg!(format!("in async {}", fd));
         let text_copy;
         let vec_copy;
         let data = match buffer {
@@ -360,6 +365,21 @@ impl Cmd {
             vec_copy.as_slice()
           }
         };
+        // dbg!(format!("got data {} {:#?}", fd, data));
+        // stream
+        //   .lock()
+        //   .await
+        //   .write_all(data)
+        //   .await
+        //   .expect("failed to write to file stream");
+        // dbg!(format!("wrote data {}", fd));
+        // stream
+        //   .lock()
+        //   .await
+        //   .flush()
+        //   .await
+        //   .expect("failed to flush written data to file stream");
+        // dbg!(format!("flushed data {}", fd));
         let mut stream = stream.lock().await;
         stream
           .write_all(data)

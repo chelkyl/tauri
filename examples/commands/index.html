@@ -15,7 +15,6 @@
       function runCommand(commandName, args, optional) {
         const id = optional ? '#response-optional' : '#response'
         const result = document.querySelector(id)
-        // FIXME: reference event emitter api usage
         window.__TAURI__
           .invoke(commandName, args)
           .then((response) => {
