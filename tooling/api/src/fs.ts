@@ -220,20 +220,23 @@ class FileStream {
   filepath: string
   fd: number = -1
   closed: boolean = true
+  options: FsOptions = {}
 
-  constructor(filepath: string) {
+  constructor(filepath: string, options: FsOptions = {}) {
     this.filepath = filepath
+    this.options = options
   }
 
   async open(): Promise<FileStream> {
-    if (!self.closed) {
+    if (!this.closed) {
       throw new Error('open called on already opened file stream')
     }
     const fd = await invokeTauriCommand<number>({
       __tauriModule: 'Fs',
       message: {
         cmd: 'openFileStream',
-        filepath: this.filepath
+        path: this.filepath,
+        options: this.options
       }
     })
     this.fd = fd
@@ -242,7 +245,7 @@ class FileStream {
   }
 
   async close(): Promise<void> {
-    if (self.closed) {
+    if (this.closed) {
       throw new Error('close called on already closed file stream')
     }
     await invokeTauriCommand({
@@ -271,7 +274,7 @@ class FileStream {
    * @returns A promise indicating the success or failure of the operation.
    */
   async read(onData: (data: Uint8Array) => void): Promise<void> {
-    if (self.closed) {
+    if (this.closed) {
       throw new Error(`read called on closed file stream`)
     }
     return invokeTauriCommand({
@@ -300,7 +303,7 @@ class FileStream {
    * @returns A promise indicating the success or failure of the operation.
    */
   async write(data: string | Uint8Array): Promise<void> {
-    if (self.closed) {
+    if (this.closed) {
       throw new Error(`write called on closed file stream`)
     }
     return invokeTauriCommand({

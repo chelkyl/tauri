@@ -72,6 +72,14 @@ pub struct FileOperationOptions {
   pub dir: Option<BaseDirectory>,
 }
 
+// FIXME: Buffer enum is copied from shell.rs, share?
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Buffer {
+  Text(String),
+  Raw(Vec<u8>),
+}
+
 /// The API descriptor.
 #[command_enum]
 #[derive(Deserialize, CommandModule)]
@@ -104,13 +112,14 @@ pub(crate) enum Cmd {
   },
   /// The read file stream API.
   #[cmd(fs_file_stream, "fs > readFileStream")]
+  #[serde(rename_all = "camelCase")]
   ReadFileStream {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   },
   /// The write file stream API.
   #[cmd(fs_file_stream, "fs > writeFileStream")]
-  WriteFileStream { fd: FileStreamFd, data: Vec<u8> },
+  WriteFileStream { fd: FileStreamFd, buffer: Buffer },
   /// The close file stream API.
   #[cmd(fs_file_stream, "fs > closeFileStream")]
   CloseFileStream { fd: FileStreamFd },
@@ -232,8 +241,9 @@ impl Cmd {
       options.and_then(|o| o.dir),
     )?;
     let open_file = OpenOptions::new()
-      .append(true)
-      .create(true)
+      // .append(false)
+      .read(true)
+      // .create(true)
       .open(&resolved_path)
       .with_context(|| format!("path: {}", resolved_path.display()))?;
     let open_file = TokioFile::from_std(open_file);
@@ -244,7 +254,11 @@ impl Cmd {
       65536, 65536, open_file,
     )));
     file_stream_store().lock().unwrap().insert(open_fd, stream);
-
+    dbg!(format!(
+      "resolved path: {} {}",
+      open_fd,
+      resolved_path.display()
+    ));
     Ok(open_fd)
   }
 
@@ -254,16 +268,30 @@ impl Cmd {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   ) -> super::Result<()> {
+    dbg!(format!("reading {}", fd));
     if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
+      dbg!(format!("got stream {}", fd));
       let stream = stream_.clone();
       crate::async_runtime::spawn(async move {
-        while let Ok(buffer) = stream.lock().await.fill_buf().await {
-          stream.lock().await.consume(buffer.len());
-          let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
-            .expect("unable to serialize data");
+        dbg!(format!("in async {}", fd));
+        let mut asdf = stream.lock().await;
+        dbg!(format!("locked stream {}", fd));
+        let mut buffer_len;
+        while let Ok(buffer) = asdf.fill_buf().await {
+          buffer_len = buffer.len();
+          dbg!(format!("read buffer {} {} {:?}", fd, buffer.len(), buffer));
+          dbg!(format!("consumed buffer {}", fd));
+          let js = crate::api::ipc::format_callback(on_data_fn, &buffer).map_err(|asdf| {
+            dbg!(format!("js format callback error {}", asdf));
+            asdf
+          });
+          // .expect("unable to serialize data");
 
-          let _ = context.window.eval(js.as_str());
+          dbg!(format!("js result {:#?}", js));
+          // dbg!(format!("js str {}", js.as_str()));
+          // let _ = context.window.eval(js.as_str()).expect("could not eval js");
         }
+        asdf.consume(buffer_len);
       });
     }
     Ok(())
@@ -274,17 +302,32 @@ impl Cmd {
   fn write_file_stream<R: Runtime>(
     context: InvokeContext<R>,
     fd: FileStreamFd,
-    data: Vec<u8>,
+    buffer: Buffer,
   ) -> super::Result<()> {
     if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
       let stream = stream_.clone();
       crate::async_runtime::spawn(async move {
+        let text_copy;
+        let vec_copy;
+        let data = match buffer {
+          Buffer::Text(t) => {
+            text_copy = t.clone();
+            text_copy.as_bytes()
+          }
+          Buffer::Raw(r) => {
+            vec_copy = r.clone();
+            vec_copy.as_slice()
+          }
+        };
+        let mut stream = stream.lock().await;
         stream
-          .lock()
-          .await
-          .write_all(&data)
+          .write_all(data)
           .await
           .expect("failed to write to file stream");
+        stream
+          .flush()
+          .await
+          .expect("failed to flush written data to file stream");
       });
     }
     Ok(())
@@ -514,7 +557,7 @@ fn resolve_path<R: Runtime>(
 #[cfg(test)]
 mod tests {
   use super::{
-    BaseDirectory, DirOperationOptions, FileOperationOptions, FileStreamFd, SafePathBuf,
+    BaseDirectory, Buffer, DirOperationOptions, FileOperationOptions, FileStreamFd, SafePathBuf,
   };
 
   use quickcheck::{Arbitrary, Gen};
@@ -526,6 +569,12 @@ mod tests {
       } else {
         BaseDirectory::Resource
       }
+    }
+  }
+
+  impl Arbitrary for Buffer {
+    fn arbitrary(g: &mut Gen) -> Self {
+      Buffer::Text(String::arbitrary(g))
     }
   }
 
@@ -576,8 +625,8 @@ mod tests {
 
   #[tauri_macros::module_command_test(fs_file_stream, "fs > writeFileStream")]
   #[quickcheck_macros::quickcheck]
-  fn write_file_stream(fd: FileStreamFd, data: Vec<u8>) {
-    let res = super::Cmd::write_file_stream(crate::test::mock_invoke_context(), fd, data);
+  fn write_file_stream(fd: FileStreamFd, buffer: Buffer) {
+    let res = super::Cmd::write_file_stream(crate::test::mock_invoke_context(), fd, buffer);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 

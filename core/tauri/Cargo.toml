@@ -323,6 +323,11 @@ name = "commands"
 path = "../../examples/commands/main.rs"
 
 [[example]]
+name = "file-stream"
+path = "../../examples/file-stream/main.rs"
+required-features = ["fs-file-stream", "path-all"]
+
+[[example]]
 name = "helloworld"
 path = "../../examples/helloworld/main.rs"
 

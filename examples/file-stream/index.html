@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tauri</title>
+  </head>
+
+  <body>
+    <h1>Tauri File Streaming</h1>
+    <div>
+      <label for="base-directory">Base file directory</label>
+      <select id="base-directory-select" name="base-directory"></select>
+      <br>
+      <label for="filepath">Filepath:</label>
+      <input id="filepath-input" name="filepath">
+      <button id="open-stream">Open stream</button>
+      <div id="open-stream-result"></div>
+      <br>
+      <textarea id="write-input"></textarea>
+      <button id="write-content">Write</button>
+      <div id="write-result"></div>
+      <br>
+      <button id="read-content">Read chunk</button>
+      <button id="clear-read-content">Clear read chunks</button>
+      <div id="read-result"></div>
+    </div>
+    <!-- <div>
+      <label for="read-filepath">Read from:</label>
+      <input id="read-filepath-input" name="read-filepath">
+      <button onclick="open_read_stream">Open read stream</button>
+      <div id="open-read-stream-result"></div>
+      <br>
+      <button onclick="read_from_stream">Read chunk</button>
+      <div id="read-container"></div>
+    </div>
+    <div>
+      <label for="write-filepath">Write from:</label>
+      <input id="write-filepath-input" name="write-filepath">
+      <button onclick="open_write_stream">Open write stream</button>
+      <br>
+      <textarea id="write-content-input"></textarea>
+      <button onclick="write_to_stream">Write chunk</button>
+    </div> -->
+    <script>
+      const { FileStream, BaseDirectory } = window.__TAURI__.fs
+
+      let filestream
+
+      /** @type HTMLSelectElement */
+      const baseDirectorySelect = document.querySelector('#base-directory-select')
+      /** @type HTMLInputElement */
+      const filepathInput = document.querySelector('#filepath-input')
+      /** @type HTMLButtonElement */
+      const openButton = document.querySelector('#open-stream')
+      /** @type HTMLDivElement */
+      const openStreamResult = document.querySelector('#open-stream-result')
+
+      /** @type HTMLButtonElement */
+      const writeButton = document.querySelector('#write-content')
+      /** @type HTMLInputElement */
+      const writeInput = document.querySelector('#write-input')
+      /** @type HTMLDivElement */
+      const writeResult = document.querySelector('#write-result')
+
+      /** @type HTMLButtonElement */
+      const readButton = document.querySelector('#read-content')
+      /** @type HTMLDivElement */
+      const readResult = document.querySelector('#read-result')
+      /** @type HTMLButtonElement */
+      const clearReadButton = document.querySelector('#clear-read-content')
+
+      async function openStream(e) {
+        filestream = new FileStream(filepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
+        openStreamResult.innerText = ''
+        try {
+          await filestream.open()
+          openStreamResult.innerText = 'Opened successfully'
+        } catch (error) {
+          openStreamResult.innerText = `${error}`
+        }
+      }
+
+      async function writeToStream(e) {
+        writeResult.innerText = ''
+        if (!filestream) {
+          alert('Filestream is not open!')
+          return
+        }
+        try {
+          await filestream.write(writeInput.value)
+          writeResult.innerText = 'Success'
+        } catch (error) {
+          writeResult.innerText = `Error: ${error}`
+        }
+      }
+
+      async function readFromStream(e) {
+        if (!filestream) {
+          alert('Filestream is not open!')
+          return
+        }
+        try {
+          await filestream.read((data) => console.log(data))
+          // await filestream.read((data) => {
+          //   const textElement = document.createElement('p')
+          //   textElement.innerText = `${data}`
+          //   readResult.appendChild(textElement)
+          // })
+        } catch (error) {
+          const textElement = document.createElement('p')
+          textElement.innerText = `Error: ${error}`
+          readResult.appendChild(textElement)
+        }
+      }
+
+      function clearReadContent(e) {
+        while (readResult.firstChild) {
+          readResult.removeChild(readResult.firstChild);
+        }
+      }
+
+      const allowedBaseDirectories = [
+        BaseDirectory.Data,
+        BaseDirectory.Temp,
+      ]
+
+      for (const baseDirId of allowedBaseDirectories) {
+        const option = document.createElement('option')
+        option.label = BaseDirectory[baseDirId]
+        option.value = BaseDirectory[baseDirId]
+        baseDirectorySelect.appendChild(option)
+      }
+      baseDirectorySelect.firstChild.selected = true
+
+      const enterKeyCode = 13
+
+      filepathInput.addEventListener('keyup', (e) => {
+        /** @type KeyboardEvent */
+        const evt = e
+        if (evt.which == enterKeyCode) {
+          openStream(e)
+        }
+      })
+      openButton.addEventListener('click', openStream)
+
+      writeButton.addEventListener('click', writeToStream)
+
+      readButton.addEventListener('click', readFromStream)
+
+      clearReadButton.addEventListener('click', clearReadContent)
+    </script>
+  </body>
+</html>

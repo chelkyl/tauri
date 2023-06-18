@@ -51,15 +51,14 @@
             "copyFile": false,
             "createDir": false,
             "exists": false,
+            "fileStream": false,
             "readDir": false,
             "readFile": false,
-            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false,
-            "writeFileStream": false
+            "writeFile": false
           },
           "globalShortcut": {
             "all": false
@@ -331,15 +330,14 @@
               "copyFile": false,
               "createDir": false,
               "exists": false,
+              "fileStream": false,
               "readDir": false,
               "readFile": false,
-              "readFileStream": false,
               "removeDir": false,
               "removeFile": false,
               "renameFile": false,
               "scope": [],
-              "writeFile": false,
-              "writeFileStream": false
+              "writeFile": false
             },
             "globalShortcut": {
               "all": false
@@ -1762,15 +1760,14 @@
             "copyFile": false,
             "createDir": false,
             "exists": false,
+            "fileStream": false,
             "readDir": false,
             "readFile": false,
-            "readFileStream": false,
             "removeDir": false,
             "removeFile": false,
             "renameFile": false,
             "scope": [],
-            "writeFile": false,
-            "writeFileStream": false
+            "writeFile": false
           },
           "allOf": [
             {
@@ -1991,13 +1988,8 @@
           "default": false,
           "type": "boolean"
         },
-        "readFileStream": {
-          "description": "Stream read file from local filesystem.",
-          "default": false,
-          "type": "boolean"
-        },
-        "writeFileStream": {
-          "description": "Stream write file to local filesystem.",
+        "fileStream": {
+          "description": "Stream to/from file on local filesystem.",
           "default": false,
           "type": "boolean"
         },
