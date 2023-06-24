@@ -216,13 +216,33 @@ async function readBinaryFile(
   return Uint8Array.from(arr)
 }
 
-class FileStream {
-  filepath: string
-  fd: number = -1
-  closed: boolean = true
+abstract class FileStream {
+  readonly filepath: string
+  protected fd: number = -1
+  protected closed: boolean = true
 
   constructor(filepath: string) {
     this.filepath = filepath
+  }
+
+  protected abstract _tauriOpenCommand: string
+  protected abstract _tauriCloseCommand: string
+
+  async open(options: FsOptions = {}): Promise<FileStream> {
+    if (!this.closed) {
+      throw new Error('open called on already opened file stream')
+    }
+    const fd = await invokeTauriCommand<number>({
+      __tauriModule: 'Fs',
+      message: {
+        cmd: this._tauriOpenCommand,
+        path: this.filepath,
+        options
+      }
+    })
+    this.fd = fd
+    this.closed = false
+    return this
   }
 
   async close(): Promise<void> {
@@ -232,7 +252,7 @@ class FileStream {
     await invokeTauriCommand({
       __tauriModule: 'Fs',
       message: {
-        cmd: 'closeFileStream',
+        cmd: this._tauriCloseCommand,
         fd: this.fd
       }
     })
@@ -242,22 +262,8 @@ class FileStream {
 }
 
 class ReadFileStream extends FileStream {
-  async open(options: FsOptions = {}): Promise<FileStream> {
-    if (!this.closed) {
-      throw new Error('open called on already opened file stream')
-    }
-    const fd = await invokeTauriCommand<number>({
-      __tauriModule: 'Fs',
-      message: {
-        cmd: 'openReadFileStream',
-        path: this.filepath,
-        options
-      }
-    })
-    this.fd = fd
-    this.closed = false
-    return this
-  }
+  protected readonly _tauriOpenCommand: string = 'openReadFileStream'
+  protected readonly _tauriCloseCommand: string = 'closeReadFileStream'
 
   /**
    * Reads `data` from the file stream.
@@ -274,6 +280,15 @@ class ReadFileStream extends FileStream {
    * @returns A promise indicating the success or failure of the operation.
    */
   async read(onData: (data: Uint8Array) => void): Promise<void> {
+    // FIXME: support streams api? https://stackoverflow.com/q/57812128
+    // https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Concepts
+    // https://www.jasnell.me/posts/webstreams
+    // https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams#consuming_a_fetch_using_asynchronous_iteration
+    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L1797-L1820
+    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L422
+    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L70
+    // https://github.com/targos/node/blob/main/deps/undici/src/types/fetch.d.ts
+    // https://github.com/nodejs/node/blob/v20.3.1/lib/events.js#L216
     if (this.closed) {
       throw new Error(`read called on closed file stream`)
     }
@@ -289,22 +304,8 @@ class ReadFileStream extends FileStream {
 }
 
 class WriteFileStream extends FileStream {
-  async open(options: FsOptions = {}): Promise<FileStream> {
-    if (!this.closed) {
-      throw new Error('open called on already opened file stream')
-    }
-    const fd = await invokeTauriCommand<number>({
-      __tauriModule: 'Fs',
-      message: {
-        cmd: 'openWriteFileStream',
-        path: this.filepath,
-        options
-      }
-    })
-    this.fd = fd
-    this.closed = false
-    return this
-  }
+  protected readonly _tauriOpenCommand: string = 'openWriteFileStream'
+  protected readonly _tauriCloseCommand: string = 'closeWriteFileStream'
 
   /**
    * Writes `data` to the file stream.

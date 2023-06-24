@@ -38,18 +38,26 @@ use std::{
 };
 use tokio::{
   fs::File as TokioFile,
-  io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufStream},
+  io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
   sync::Mutex as TokioMutex,
 };
 
 use std::collections::HashMap;
 
 type FileStreamFd = os::fd::RawFd;
-type FileStreamStore = Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufStream<TokioFile>>>>>>;
+type FileReadStreamStore = Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufReader<TokioFile>>>>>>;
+type FileWriteStreamStore =
+  Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufWriter<TokioFile>>>>>>;
 
-fn file_stream_store() -> &'static FileStreamStore {
+fn file_read_stream_store() -> &'static FileReadStreamStore {
   use once_cell::sync::Lazy;
-  static STORE: Lazy<FileStreamStore> = Lazy::new(Default::default);
+  static STORE: Lazy<FileReadStreamStore> = Lazy::new(Default::default);
+  &STORE
+}
+
+fn file_write_stream_store() -> &'static FileWriteStreamStore {
+  use once_cell::sync::Lazy;
+  static STORE: Lazy<FileWriteStreamStore> = Lazy::new(Default::default);
   &STORE
 }
 
@@ -117,6 +125,9 @@ pub(crate) enum Cmd {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   },
+  /// The close read file stream API.
+  #[cmd(fs_read_file_stream, "fs > closeReadFileStream")]
+  CloseReadFileStream { fd: FileStreamFd },
   /// The open write file stream API.
   #[cmd(fs_write_file_stream, "fs > openWriteFileStream")]
   OpenWriteFileStream {
@@ -126,9 +137,9 @@ pub(crate) enum Cmd {
   /// The write file stream API.
   #[cmd(fs_write_file_stream, "fs > writeFileStream")]
   WriteFileStream { fd: FileStreamFd, buffer: Buffer },
-  /// The close file stream API.
-  #[cmd(fs_write_file_stream, "fs > closeFileStream")]
-  CloseFileStream { fd: FileStreamFd },
+  /// The close write file stream API.
+  #[cmd(fs_write_file_stream, "fs > closeWriteFileStream")]
+  CloseWriteFileStream { fd: FileStreamFd },
   /// The read dir API.
   #[cmd(fs_read_dir, "fs > readDir")]
   ReadDir {
@@ -253,16 +264,14 @@ impl Cmd {
     let open_file = TokioFile::from_std(open_file);
     let open_fd = open_file.as_raw_fd();
 
-    // 64 KiB buffer
-    let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
-      65536, 0, open_file,
+    let stream = Arc::new(TokioMutex::new(BufReader::with_capacity(
+      65536, /* 64 KiB buffer */
+      open_file,
     )));
-    file_stream_store().lock().unwrap().insert(open_fd, stream);
-    dbg!(format!(
-      "resolved read path: {} {}",
-      open_fd,
-      resolved_path.display()
-    ));
+    file_read_stream_store()
+      .lock()
+      .unwrap()
+      .insert(open_fd, stream);
     Ok(open_fd)
   }
 
@@ -287,16 +296,14 @@ impl Cmd {
     let open_file = TokioFile::from_std(open_file);
     let open_fd = open_file.as_raw_fd();
 
-    // 64 KiB buffer
-    let stream = Arc::new(TokioMutex::new(BufStream::with_capacity(
-      0, 65536, open_file,
+    let stream = Arc::new(TokioMutex::new(BufWriter::with_capacity(
+      65536, /* 64 KiB buffer */
+      open_file,
     )));
-    file_stream_store().lock().unwrap().insert(open_fd, stream);
-    dbg!(format!(
-      "resolved write path: {} {}",
-      open_fd,
-      resolved_path.display()
-    ));
+    file_write_stream_store()
+      .lock()
+      .unwrap()
+      .insert(open_fd, stream);
     Ok(open_fd)
   }
 
@@ -307,33 +314,26 @@ impl Cmd {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   ) -> super::Result<()> {
-    dbg!(format!("reading {}", fd));
-    if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
-      dbg!(format!("got stream {}", fd));
-      let stream = stream_.clone();
+    if let Some(stream_) = file_read_stream_store().lock().unwrap().get_mut(&fd) {
+      let stream_ = stream_.clone();
       crate::async_runtime::spawn(async move {
-        dbg!(format!("in async {}", fd));
-        let mut asdf = stream.lock().await;
-        dbg!(format!("locked stream {}", fd));
-        // asdf.read
+        let mut stream = stream_.lock().await;
         loop {
           let length = {
-            let buffer = asdf.fill_buf().await.expect("msg");
+            let buffer = stream
+              .fill_buf()
+              .await
+              .expect("could not read data to buffer");
             if buffer.len() == 0 {
-              dbg!(format!("reached eof {}", fd));
               break;
             }
-            dbg!(format!("read buffer {} {} {:?}", fd, buffer.len(), buffer));
             let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
               .expect("unable to serialize data");
 
-            dbg!(format!("js result {:#?}", js));
-            dbg!(format!("js str {}", js.as_str()));
             let _ = context.window.eval(js.as_str()).expect("could not eval js");
             buffer.len()
           };
-          asdf.consume(length);
-          dbg!(format!("consumed buffer {}", fd));
+          stream.consume(length);
         }
       });
     }
@@ -347,12 +347,9 @@ impl Cmd {
     fd: FileStreamFd,
     buffer: Buffer,
   ) -> super::Result<()> {
-    dbg!(format!("writing: {}", fd));
-    if let Some(stream_) = file_stream_store().lock().unwrap().get_mut(&fd) {
-      dbg!(format!("got stream {}", fd));
-      let stream = stream_.clone();
+    if let Some(stream_) = file_write_stream_store().lock().unwrap().get_mut(&fd) {
+      let stream_ = stream_.clone();
       crate::async_runtime::spawn(async move {
-        dbg!(format!("in async {}", fd));
         let text_copy;
         let vec_copy;
         let data = match buffer {
@@ -365,42 +362,37 @@ impl Cmd {
             vec_copy.as_slice()
           }
         };
-        // dbg!(format!("got data {} {:#?}", fd, data));
-        // stream
-        //   .lock()
-        //   .await
-        //   .write_all(data)
-        //   .await
-        //   .expect("failed to write to file stream");
-        // dbg!(format!("wrote data {}", fd));
-        // stream
-        //   .lock()
-        //   .await
-        //   .flush()
-        //   .await
-        //   .expect("failed to flush written data to file stream");
-        // dbg!(format!("flushed data {}", fd));
-        let mut stream = stream.lock().await;
+        let mut stream = stream_.lock().await;
         stream
           .write_all(data)
           .await
-          .expect("failed to write to file stream");
+          .expect("could not write to file stream");
         stream
           .flush()
           .await
-          .expect("failed to flush written data to file stream");
+          .expect("could not flush written data to file stream");
       });
     }
     Ok(())
   }
 
-  #[module_command_handler(fs_write_file_stream)]
+  #[module_command_handler(fs_read_file_stream)]
   #[allow(unused_variables)]
-  fn close_file_stream<R: Runtime>(
+  fn close_read_file_stream<R: Runtime>(
     context: InvokeContext<R>,
     fd: FileStreamFd,
   ) -> super::Result<()> {
-    file_stream_store().lock().unwrap().remove(&fd);
+    file_read_stream_store().lock().unwrap().remove(&fd);
+    Ok(())
+  }
+
+  #[module_command_handler(fs_write_file_stream)]
+  #[allow(unused_variables)]
+  fn close_write_file_stream<R: Runtime>(
+    context: InvokeContext<R>,
+    fd: FileStreamFd,
+  ) -> super::Result<()> {
+    file_write_stream_store().lock().unwrap().remove(&fd);
     Ok(())
   }
 
@@ -698,10 +690,17 @@ mod tests {
     crate::test_utils::assert_not_allowlist_error(res);
   }
 
-  #[tauri_macros::module_command_test(fs_write_file_stream, "fs > closeFileStream")]
+  #[tauri_macros::module_command_test(fs_read_file_stream, "fs > closeReadFileStream")]
   #[quickcheck_macros::quickcheck]
-  fn close_file_stream(fd: FileStreamFd) {
-    let res = super::Cmd::close_file_stream(crate::test::mock_invoke_context(), fd);
+  fn close_read_file_stream(fd: FileStreamFd) {
+    let res = super::Cmd::close_read_file_stream(crate::test::mock_invoke_context(), fd);
+    crate::test_utils::assert_not_allowlist_error(res);
+  }
+
+  #[tauri_macros::module_command_test(fs_write_file_stream, "fs > closeWriteFileStream")]
+  #[quickcheck_macros::quickcheck]
+  fn close_write_file_stream(fd: FileStreamFd) {
+    let res = super::Cmd::close_write_file_stream(crate::test::mock_invoke_context(), fd);
     crate::test_utils::assert_not_allowlist_error(res);
   }
 

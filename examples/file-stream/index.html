@@ -8,9 +8,11 @@
 
   <body>
     <h1>Tauri File Streaming</h1>
-    <label for="base-directory">Base file directory</label>
-    <select id="base-directory-select" name="base-directory"></select>
-    <div id="grid">
+    <div>
+      <label for="base-directory">Base file directory</label>
+      <select id="base-directory-select" name="base-directory"></select>
+    </div>
+    <div class="grid">
       <div>
         <label for="write-filepath">Filepath:</label>
         <input id="write-filepath-input" name="write-filepath">
@@ -92,7 +94,7 @@
       const readResult = document.querySelector('#read-content-result')
 
       /** @type {HTMLDivElement} */
-      const gridContainer = document.querySelector('#grid')
+      const gridContainer = document.querySelector('.grid')
       gridContainer.style.display = 'grid'
       gridContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(300px, auto))'
 
