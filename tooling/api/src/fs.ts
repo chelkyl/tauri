@@ -220,15 +220,17 @@ abstract class FileStream {
   readonly filepath: string
   protected fd: number = -1
   protected closed: boolean = true
+  readonly options: FsOptions = {}
 
-  constructor(filepath: string) {
+  constructor(filepath: string, options: FsOptions = {}) {
     this.filepath = filepath
+    this.options = options
   }
 
   protected abstract _tauriOpenCommand: string
   protected abstract _tauriCloseCommand: string
 
-  async open(options: FsOptions = {}): Promise<FileStream> {
+  async open(): Promise<FileStream> {
     if (!this.closed) {
       throw new Error('open called on already opened file stream')
     }
@@ -237,7 +239,7 @@ abstract class FileStream {
       message: {
         cmd: this._tauriOpenCommand,
         path: this.filepath,
-        options
+        options: this.options
       }
     })
     this.fd = fd
@@ -265,6 +267,32 @@ class ReadFileStream extends FileStream {
   protected readonly _tauriOpenCommand: string = 'openReadFileStream'
   protected readonly _tauriCloseCommand: string = 'closeReadFileStream'
 
+  public get stream(): ReadableStream<Uint8Array> {
+    const _start = async (): Promise<FileStream> => {
+      return this.open()
+    }
+    const _pull = async (
+      controller: ReadableStreamDefaultController
+    ): Promise<void> => {
+      return this.read((data) => {
+        controller.enqueue(data)
+      })
+    }
+    const _cancel = async (reason: string): Promise<void> => this.close()
+    return new ReadableStream({
+      async start(controller) {
+        await _start()
+        await _pull(controller)
+      },
+      async pull(controller) {
+        await _pull(controller)
+      },
+      async cancel(reason: string) {
+        await _cancel(reason)
+      }
+    })
+  }
+
   /**
    * Reads `data` from the file stream.
    *
@@ -280,15 +308,6 @@ class ReadFileStream extends FileStream {
    * @returns A promise indicating the success or failure of the operation.
    */
   async read(onData: (data: Uint8Array) => void): Promise<void> {
-    // FIXME: support streams api? https://stackoverflow.com/q/57812128
-    // https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Concepts
-    // https://www.jasnell.me/posts/webstreams
-    // https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams#consuming_a_fetch_using_asynchronous_iteration
-    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L1797-L1820
-    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L422
-    // https://github.com/targos/node/blob/main/deps/undici/src/lib/fetch/index.js#L70
-    // https://github.com/targos/node/blob/main/deps/undici/src/types/fetch.d.ts
-    // https://github.com/nodejs/node/blob/v20.3.1/lib/events.js#L216
     if (this.closed) {
       throw new Error(`read called on closed file stream`)
     }
@@ -306,6 +325,29 @@ class ReadFileStream extends FileStream {
 class WriteFileStream extends FileStream {
   protected readonly _tauriOpenCommand: string = 'openWriteFileStream'
   protected readonly _tauriCloseCommand: string = 'closeWriteFileStream'
+
+  public get stream(): WritableStream<string | Uint8Array> {
+    const _start = async (): Promise<FileStream> => this.open()
+    const _write = async (
+      chunk: string | Uint8Array,
+      controller: WritableStreamDefaultController
+    ): Promise<void> => this.write(chunk)
+    const _close = async (): Promise<void> => this.close()
+    return new WritableStream({
+      async start(controller) {
+        await _start()
+      },
+      async write(chunk, controller) {
+        await _write(chunk, controller)
+      },
+      async close() {
+        await _close()
+      },
+      async abort(reason: string) {
+        await _close()
+      }
+    })
+  }
 
   /**
    * Writes `data` to the file stream.

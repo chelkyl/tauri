@@ -38,7 +38,10 @@ use std::{
 };
 use tokio::{
   fs::File as TokioFile,
-  io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
+  io::{
+    self, AsyncBufRead, AsyncBufReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt,
+    BufReader, BufWriter,
+  },
   sync::Mutex as TokioMutex,
 };
 
@@ -265,7 +268,7 @@ impl Cmd {
     let open_fd = open_file.as_raw_fd();
 
     let stream = Arc::new(TokioMutex::new(BufReader::with_capacity(
-      65536, /* 64 KiB buffer */
+      62_500usize, /* 64 kB buffer */
       open_file,
     )));
     file_read_stream_store()
@@ -297,7 +300,7 @@ impl Cmd {
     let open_fd = open_file.as_raw_fd();
 
     let stream = Arc::new(TokioMutex::new(BufWriter::with_capacity(
-      65536, /* 64 KiB buffer */
+      62_500usize, /* 64 kB buffer */
       open_file,
     )));
     file_write_stream_store()
@@ -325,7 +328,11 @@ impl Cmd {
               .await
               .expect("could not read data to buffer");
             if buffer.len() == 0 {
-              break;
+              stream
+                .seek(tokio::io::SeekFrom::Current(0))
+                .await
+                .expect("could not seek in file");
+              continue;
             }
             let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
               .expect("unable to serialize data");
