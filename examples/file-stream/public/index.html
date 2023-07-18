@@ -33,7 +33,6 @@
       .grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(300px, auto));
-        grid-template-rows: repeat(2, 1fr);
         column-gap: 1em;
         row-gap: 1em;
         flex: 1;
@@ -45,12 +44,7 @@
       }
 
       #read-content-result {
-        max-height: 20em;
-        overflow: auto;
-      }
-
-      #tail-content-result {
-        max-height: 20em;
+        max-height: 50vh;
         overflow: auto;
       }
     </style>
@@ -87,17 +81,6 @@
         <button id="read-content">Read chunk</button>
         <button id="clear-read-content">Clear read chunks</button>
         <div id="read-content-result"></div>
-      </div>
-      <div></div>
-      <div>
-        <label for="tail-filepath">Filepath:</label>
-        <input id="tail-filepath-input" name="tail-filepath" />
-        <button id="tail-filepath-open">Open tail read stream</button>
-        <button id="tail-filepath-close">Close tail read stream</button>
-        <div id="tail-filepath-open-result"></div>
-        <br />
-        <button id="clear-tail-content">Clear read chunks</button>
-        <div id="tail-content-result"></div>
       </div>
     </div>
     <script src="./index.js"></script>

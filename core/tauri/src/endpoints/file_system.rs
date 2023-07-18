@@ -11,6 +11,7 @@ use crate::{
     ipc::CallbackFn,
     path::BaseDirectory,
   },
+  async_runtime::block_on,
   event,
   scope::Scopes,
   Config, Env, Manager, PackageInfo, Runtime, Window,
@@ -25,7 +26,11 @@ use serde::{
 };
 use tauri_macros::{command_enum, module_command_handler, CommandModule};
 
-use std::fmt::{Debug, Formatter};
+use notify::{Config as WatcherConfig, RecommendedWatcher, Watcher};
+use std::{
+  fmt::{Debug, Formatter},
+  time::Duration,
+};
 use std::{
   fs,
   fs::File,
@@ -42,15 +47,20 @@ use tokio::{
     self, AsyncBufRead, AsyncBufReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt,
     BufReader, BufWriter,
   },
-  sync::Mutex as TokioMutex,
+  sync::{mpsc::channel, Mutex as TokioMutex},
 };
 
 use std::collections::HashMap;
 
 type FileStreamFd = os::fd::RawFd;
-type FileReadStreamStore = Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufReader<TokioFile>>>>>>;
+type FileReadStreamStore = Arc<Mutex<HashMap<FileStreamFd, Arc<FileReadStream>>>>;
 type FileWriteStreamStore =
   Arc<Mutex<HashMap<FileStreamFd, Arc<TokioMutex<BufWriter<TokioFile>>>>>>;
+
+pub struct FileReadStream {
+  stream: TokioMutex<BufReader<TokioFile>>,
+  path: SafePathBuf,
+}
 
 fn file_read_stream_store() -> &'static FileReadStreamStore {
   use once_cell::sync::Lazy;
@@ -267,14 +277,17 @@ impl Cmd {
     let open_file = TokioFile::from_std(open_file);
     let open_fd = open_file.as_raw_fd();
 
-    let stream = Arc::new(TokioMutex::new(BufReader::with_capacity(
+    let stream = TokioMutex::new(BufReader::with_capacity(
       62_500usize, /* 64 kB buffer */
       open_file,
-    )));
-    file_read_stream_store()
-      .lock()
-      .unwrap()
-      .insert(open_fd, stream);
+    ));
+    file_read_stream_store().lock().unwrap().insert(
+      open_fd,
+      Arc::new(FileReadStream {
+        stream,
+        path: resolved_path,
+      }),
+    );
     Ok(open_fd)
   }
 
@@ -317,30 +330,54 @@ impl Cmd {
     fd: FileStreamFd,
     on_data_fn: CallbackFn,
   ) -> super::Result<()> {
-    if let Some(stream_) = file_read_stream_store().lock().unwrap().get_mut(&fd) {
-      let stream_ = stream_.clone();
+    if let Some(stream_obj_) = file_read_stream_store().lock().unwrap().get_mut(&fd) {
+      let stream_obj = stream_obj_.clone();
       crate::async_runtime::spawn(async move {
+        let stream_ = &stream_obj.clone().stream;
         let mut stream = stream_.lock().await;
-        loop {
-          let length = {
-            let buffer = stream
-              .fill_buf()
-              .await
-              .expect("could not read data to buffer");
-            if buffer.len() == 0 {
-              stream
-                .seek(tokio::io::SeekFrom::Current(0))
-                .await
-                .expect("could not seek in file");
-              continue;
-            }
-            let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
-              .expect("unable to serialize data");
+        let (tx, mut rx) = channel::<Result<notify::Event, notify::Error>>(1);
+        let tx_ = tx.clone();
+        let mut watcher = RecommendedWatcher::new(
+          move |res| {
+            block_on(async {
+              tx.send(res).await.unwrap();
+            })
+          },
+          WatcherConfig::default().with_poll_interval(Duration::from_secs(1)),
+        )
+        .expect("could not create watcher");
+        watcher
+          .watch(
+            stream_obj.path.as_ref(),
+            notify::RecursiveMode::NonRecursive,
+          )
+          .expect("could not watch filepath");
 
-            let _ = context.window.eval(js.as_str()).expect("could not eval js");
-            buffer.len()
-          };
-          stream.consume(length);
+        tx_
+          .send(notify::Result::Ok(notify::Event::default()))
+          .await
+          .expect("failed to prime watcher");
+        while let Some(received) = rx.recv().await {
+          match received {
+            Ok(event) => loop {
+              let length = {
+                let buffer = stream
+                  .fill_buf()
+                  .await
+                  .expect("could not read data to buffer");
+                if buffer.len() == 0 {
+                  break;
+                }
+                let js = crate::api::ipc::format_callback(on_data_fn, &buffer)
+                  .expect("unable to serialize data");
+
+                let _ = context.window.eval(js.as_str()).expect("could not eval js");
+                buffer.len()
+              };
+              stream.consume(length);
+            },
+            Err(e) => {}
+          }
         }
       });
     }

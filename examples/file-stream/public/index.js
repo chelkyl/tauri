@@ -19,7 +19,9 @@ const maxReadRowsInput = document.querySelector('#max-read-rows-input')
  * @returns {Promise<FStream>}
  */
 async function openStream(cls, filepathInput, resultElement) {
-  const filestream = new cls(filepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
+  const filestream = new cls(filepathInput.value, {
+    dir: BaseDirectory[baseDirectorySelect.value]
+  })
   resultElement.innerText = ''
   try {
     await filestream.open()
@@ -114,10 +116,7 @@ function clearReadContent(readResult) {
 }
 
 {
-  const allowedBaseDirectories = [
-    BaseDirectory.Data,
-    BaseDirectory.Temp,
-  ]
+  const allowedBaseDirectories = [BaseDirectory.Data, BaseDirectory.Temp]
 
   let isFirstOption = true
   for (const baseDirId of allowedBaseDirectories) {
@@ -140,15 +139,16 @@ const asyncCallbackOnEnter = (asyncCallback, modifiers = []) => {
   /**
    * @type {('Shift'|'Control'|'Alt')[]}
    */
-  const MODIFIERS = [
-    'Shift',
-    'Control',
-    'Alt',
-  ]
+  const MODIFIERS = ['Shift', 'Control', 'Alt']
   /** @type {(evt: KeyboardEvent) => Promise<void>} */
   return async (evt) => {
-    if (evt.key === "Enter") {
-      if (!MODIFIERS.every((value) => evt.getModifierState(value) === (modifiers.indexOf(value) !== -1))) {
+    if (evt.key === 'Enter') {
+      if (
+        !MODIFIERS.every(
+          (value) =>
+            evt.getModifierState(value) === (modifiers.indexOf(value) !== -1)
+        )
+      ) {
         return
       }
       await asyncCallback()
@@ -186,18 +186,55 @@ const asyncCallbackOnEnter = (asyncCallback, modifiers = []) => {
   }
 
   const openWriteStream = async () => {
-    if (writeFileStreamStore.fileStream && !writeFileStreamStore.fileStream.closed) {
+    if (
+      writeFileStreamStore.fileStream &&
+      !writeFileStreamStore.fileStream.closed
+    ) {
       await writeFileStreamStore.fileStream.close()
     }
-    writeFileStreamStore.fileStream = await openStream(WriteFileStream, writeFilepathInput, writeOpenResult)
+    writeFileStreamStore.fileStream = await openStream(
+      WriteFileStream,
+      writeFilepathInput,
+      writeOpenResult
+    )
   }
-  writeFilepathInput.addEventListener('keyup', asyncCallbackOnEnter(openWriteStream))
+  writeFilepathInput.addEventListener(
+    'keyup',
+    asyncCallbackOnEnter(openWriteStream)
+  )
   writeOpenButton.addEventListener('click', openWriteStream)
-  writeCloseButton.addEventListener('click', async () => await closeStream(writeFileStreamStore.fileStream, writeFilepathInput, writeOpenResult))
+  writeCloseButton.addEventListener(
+    'click',
+    async () =>
+      await closeStream(
+        writeFileStreamStore.fileStream,
+        writeFilepathInput,
+        writeOpenResult
+      )
+  )
 
-  const _writeToStream = async () => await writeToStream(writeFileStreamStore, writeInput, writeResult)
+  const _writeToStream = async () =>
+    await writeToStream(writeFileStreamStore, writeInput, writeResult)
   writeInput.addEventListener('keyup', asyncCallbackOnEnter(_writeToStream))
   writeButton.addEventListener('click', _writeToStream)
+}
+
+/**
+ * @param {ReadableStream<Uint8Array>} stream
+ */
+async function* streamAsyncIterable(stream) {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        return
+      }
+      yield value
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 {
@@ -230,90 +267,61 @@ const asyncCallbackOnEnter = (asyncCallback, modifiers = []) => {
   }
 
   const openReadStream = async () => {
-    if (readFileStreamStore.fileStream && !readFileStreamStore.fileStream.closed) {
+    if (
+      readFileStreamStore.fileStream &&
+      !readFileStreamStore.fileStream.closed
+    ) {
       await readFileStreamStore.fileStream.close()
     }
-    readFileStreamStore.fileStream = await openStream(ReadFileStream, readFilepathInput, readOpenResult)
+    readFileStreamStore.fileStream = await openStream(
+      ReadFileStream,
+      readFilepathInput,
+      readOpenResult
+    )
   }
-  readFilepathInput.addEventListener('keyup', asyncCallbackOnEnter(openReadStream))
+  readFilepathInput.addEventListener(
+    'keyup',
+    asyncCallbackOnEnter(openReadStream)
+  )
   readOpenButton.addEventListener('click', openReadStream)
-  readCloseButton.addEventListener('click', async () => await closeStream(readFileStreamStore.fileStream, readFilepathInput, readOpenResult))
+  readCloseButton.addEventListener(
+    'click',
+    async () =>
+      await closeStream(
+        readFileStreamStore.fileStream,
+        readFilepathInput,
+        readOpenResult
+      )
+  )
 
-  readButton.addEventListener('click', () => readFromStream(readFileStreamStore, readResult))
+  readButton.addEventListener('click', () =>
+    readFromStream(readFileStreamStore, readResult)
+  )
   clearReadButton.addEventListener('click', () => clearReadContent(readResult))
-}
 
-{
-  /** @type {HTMLInputElement} */
-  // @ts-ignore
-  const tailFilepathInput = document.querySelector('#tail-filepath-input')
-  /** @type {HTMLButtonElement} */
-  // @ts-ignore
-  const tailOpenButton = document.querySelector('#tail-filepath-open')
-  /** @type {HTMLButtonElement} */
-  // @ts-ignore
-  const tailCloseButton = document.querySelector('#tail-filepath-close')
-  /** @type {HTMLDivElement} */
-  // @ts-ignore
-  const tailOpenResult = document.querySelector('#tail-filepath-open-result')
-
-  /** @type {HTMLButtonElement} */
-  // @ts-ignore
-  const clearTailButton = document.querySelector('#clear-tail-content')
-  /** @type {HTMLDivElement} */
-  // @ts-ignore
-  const tailResult = document.querySelector('#tail-content-result')
-
-  /** @type {ReadFileStreamStore} */
-  let tailFileStreamStore = {
-    fileStream: null
-  }
-
-  /**
-   * @param {ReadableStream<Uint8Array>} stream
-   */
-  async function* streamAsyncIterable(stream) {
-    const reader = stream.getReader()
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) {
-          return
-        }
-        yield value
-      }
-    } finally {
-      reader.releaseLock()
-    }
-  }
-
-  const openTailStream = async () => {
-    if (tailFileStreamStore.fileStream && !tailFileStreamStore.fileStream.closed) {
-      await tailFileStreamStore.fileStream.close()
-    }
-    // tailFileStreamStore.fileStream = await openStream(ReadFileStream, tailFilepathInput, tailOpenResult)
-    tailFileStreamStore.fileStream = new ReadFileStream(tailFilepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
-    tailOpenResult.innerText = ''
-    if (!tailFileStreamStore.fileStream) {
-      return
-    }
-    try {
-      let statused = false
-      // note: most browsers do not support for await of syntax yet
-      for await (const data of streamAsyncIterable(tailFileStreamStore.fileStream.stream)) {
-        if (!statused) {
-          tailOpenResult.innerText = 'Opened successfully'
-          statused = true
-        }
-        cyclicAddElement(tailResult, String.fromCharCode.apply(String, data))
-      }
-    } catch (error) {
-      tailOpenResult.innerText = `${error}`
-    }
-  }
-  tailFilepathInput.addEventListener('keyup', asyncCallbackOnEnter(openTailStream))
-  tailOpenButton.addEventListener('click', openTailStream)
-  tailCloseButton.addEventListener('click', async () => await closeStream(tailFileStreamStore.fileStream, tailFilepathInput, tailOpenResult))
-
-  clearTailButton.addEventListener('click', () => clearReadContent(tailResult))
+  // alternative implementation to openReadStream using for await
+  // with this, using readButton to call readFromStream is no longer needed
+  // const openReadStreamIterable = async () => {
+  //   if (readFileStreamStore.fileStream && !readFileStreamStore.fileStream.closed) {
+  //     await readFileStreamStore.fileStream.close()
+  //   }
+  //   // readFileStreamStore.fileStream = await openStream(ReadFileStream, readFilepathInput, readOpenResult)
+  //   readFileStreamStore.fileStream = new ReadFileStream(readFilepathInput.value, {dir: BaseDirectory[baseDirectorySelect.value]})
+  //   readOpenResult.innerText = ''
+  //   if (!readFileStreamStore.fileStream) {
+  //     return
+  //   }
+  //   try {
+  //     let statused = false
+  //     for await (const data of streamAsyncIterable(readFileStreamStore.fileStream.stream)) {
+  //       if (!statused) {
+  //         readOpenResult.innerText = 'Opened successfully'
+  //         statused = true
+  //       }
+  //       cyclicAddElement(readResult, String.fromCharCode.apply(String, data))
+  //     }
+  //   } catch (error) {
+  //     readOpenResult.innerText = `${error}`
+  //   }
+  // }
 }
